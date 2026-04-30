@@ -52,6 +52,10 @@
     ],
     "commands": [
       {
+        "command": "markdownWysiwyg.openWith",
+        "title": "%command.openWith.title%"
+      },
+      {
         "command": "markdownWysiwyg.switchToTextEditor",
         "title": "%command.switchToTextEditor.title%",
         "icon": "$(eye-closed)"
@@ -85,6 +89,13 @@
       }
     ],
     "menus": {
+      "explorer/context": [
+        {
+          "command": "markdownWysiwyg.openWith",
+          "when": "resourceExtname == '.md' || resourceExtname == '.markdown'",
+          "group": "navigation@10"
+        }
+      ],
       "editor/title": [
         {
           "command": "markdownWysiwyg.switchToTextEditor",
@@ -139,7 +150,7 @@
             "%config.defaultMode.preview%",
             "%config.defaultMode.markdown%"
           ],
-          "default": "preview",
+          "default": "markdown",
           "description": "%config.defaultMode.description%"
         },
         "markdownWysiwyg.editorMaxWidth": {

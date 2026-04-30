@@ -292,6 +292,21 @@ export function activate(context: vscode.ExtensionContext) {
             },
         ),
     );
+
+    // 右键菜单：使用 WYSIWYG 编辑器打开
+    context.subscriptions.push(
+        vscode.commands.registerCommand(
+            "markdownWysiwyg.openWith",
+            async (uri?: vscode.Uri) => {
+                if (!uri) { return; }
+                await vscode.commands.executeCommand(
+                    "vscode.openWith",
+                    uri,
+                    MarkdownEditorProvider.viewType,
+                );
+            },
+        ),
+    );
 }
 
 export function deactivate() {}

@@ -1,4 +1,5 @@
 {
+  "command.openWith.title": "使用 WYSIWYG 编辑器打开",
   "command.switchToTextEditor.title": "关闭预览",
   "command.switchToPreview.title": "打开预览",
   "config.autoSave.description": "编辑 Markdown 内容后自动保存到磁盘（无需 Cmd+S / Ctrl+S）。",
