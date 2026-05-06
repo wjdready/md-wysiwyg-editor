@@ -239,6 +239,7 @@
     "@vitest/coverage-v8": "^2.1.0",
     "@vscode/vsce": "^2.32.0",
     "esbuild": "^0.24.0",
+    "esbuild-plugin-copy": "^2.1.1",
     "jsdom": "24.1.3",
     "typescript": "^5.7.0",
     "vitest": "^2.1.0"
@@ -253,8 +254,11 @@
     "@milkdown/transformer": "^7.5.0",
     "@milkdown/utils": "^7.19.0",
     "dompurify": "^3.3.3",
+    "katex": "^0.16.45",
     "mermaid": "^11.0.0",
     "prosemirror-tables": "^1.8.5",
-    "refractor": "^5.0.0"
+    "refractor": "^5.0.0",
+    "rehype-katex": "^7.0.1",
+    "remark-math": "^6.0.0"
   }
 }

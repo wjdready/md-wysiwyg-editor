@@ -682,6 +682,39 @@ import { refractor } from "./highlighter";
 import DOMPurify from "dompurify";
 import { createCodeBlockView } from "./components/codeBlock";
 import { createImageView } from "./components/imageView";
+import {
+    remarkMathPlugin,
+    inlineMathSchema,
+    mathBlockSchema,
+    createInlineMathView,
+    createMathBlockView,
+} from "./components/mathBlock";
+
+// 数学公式输入规则：Mod-Shift-m 插入块公式，Mod-m 插入行内公式
+const mathInputRulePlugin = $prose((ctx) => {
+    const schema = ctx.get(schemaCtx);
+
+    return keymap({
+        "Mod-Shift-m": (state, dispatch) => {
+            if (dispatch) {
+                const { from } = state.selection;
+                const tr = state.tr;
+                tr.insert(from, schema.nodes.mathBlock.create({ value: "" }));
+                dispatch(tr);
+            }
+            return true;
+        },
+        "Mod-m": (state, dispatch) => {
+            if (dispatch) {
+                const { from } = state.selection;
+                const tr = state.tr;
+                tr.insert(from, schema.nodes.inlineMath.create({ value: "" }));
+                dispatch(tr);
+            }
+            return true;
+        },
+    });
+});
 
 // ── HTML inline NodeView ───────────────────────────────────────────────────
 // Milkdown 的 html 节点（atom, inline）默认以 textContent 显示原始标签。
@@ -703,6 +736,39 @@ function createHtmlView(node: { attrs: Record<string, string> }) {
 }
 
 let _editor: Editor | null = null;
+
+// 用户原始 Markdown 中的块公式格式记录（单行 vs 多行）
+const _mathBlockFormats = new Map<string, 'inline' | 'block'>();
+
+function preprocessMathBlocks(markdown: string): string {
+    _mathBlockFormats.clear();
+    return markdown.replace(
+        /\$\$([\s\S]*?)\$\$/g,
+        (match, content) => {
+            const trimmed = content.trim();
+            // 检测是否为单行格式（开头的 $$ 后面不是换行）
+            if (!match.startsWith('$$\n')) {
+                _mathBlockFormats.set(trimmed, 'inline');
+            }
+            // 统一转换为多行格式供 remark-math 解析
+            return `$$\n${trimmed}\n$$`;
+        }
+    );
+}
+
+function restoreMathBlockFormats(markdown: string): string {
+    return markdown.replace(
+        /\$\$\n([\s\S]*?)\n\$\$/g,
+        (match, content) => {
+            const trimmed = content.trim();
+            // 如果原始格式是单行，恢复为单行
+            if (_mathBlockFormats.get(trimmed) === 'inline') {
+                return `$$ ${trimmed} $$`;
+            }
+            return match;
+        }
+    );
+}
 
 // 上次保存/加载的 Markdown 原文（含用户原始格式：空行、分隔线宽度等）
 // 用于在自动保存时做最小化差异合并，避免全量序列化改变未编辑区域的格式
@@ -780,7 +846,8 @@ export async function createEditor(
     _editor = await Editor.make()
         .config((ctx) => {
             ctx.set(rootCtx, container);
-            ctx.set(defaultValueCtx, initialMarkdown);
+            const preprocessed = preprocessMathBlocks(initialMarkdown);
+            ctx.set(defaultValueCtx, preprocessed);
             // 配置序列化选项，尽量保留原始格式
             ctx.update(remarkStringifyOptionsCtx, (prev) => ({
                 ...prev,
@@ -789,15 +856,21 @@ export async function createEditor(
                 handlers: {
                     ...(prev.handlers ?? {}),
                     // 覆盖 remark-gfm 的 table handler：每列保持自然宽度，
-                    // 不重排列宽，避免编辑单个单元格时整表格式全部改变
+                    // 不重排列宽，避免编辑单个单元格时整表格格式全部改变
                     table: serializeTableNoAlign,
                 },
+                // 禁用 $ 字符的转义，允许数学公式正常输入
+                unsafe: [
+                    ...(prev.unsafe ?? []),
+                    { character: '$', inConstruct: ['phrasing' as any] },
+                ],
             }));
             _savedMarkdown = initialMarkdown;
             ctx.get(listenerCtx).markdownUpdated((_ctx, markdown) => {
                 if (!isSettled) return;          // 跳过初始化同步触发
                 if (!_hasUserInteracted) return; // 跳过初始化异步触发（RAF/microtask 延迟交付）
-                const toSave = applyMinimalChanges(_savedMarkdown, markdown);
+                const restored = restoreMathBlockFormats(markdown);
+                const toSave = applyMinimalChanges(_savedMarkdown, restored);
                 if (toSave === _savedMarkdown) return; // 内容无实质变化，不触发保存
                 _savedMarkdown = toSave;
                 debouncedUpdate(toSave);
@@ -822,10 +895,15 @@ export async function createEditor(
                             onRenameImage,
                         ),
                 ],
+                ["inlineMath", createInlineMathView],
+                ["mathBlock", createMathBlockView],
             ]);
         })
         .use(commonmark)
         .use(gfm)
+        .use(remarkMathPlugin)
+        .use(inlineMathSchema)
+        .use(mathBlockSchema)
         .use(listener)
         .use(prism)
         .use(historyPlugin)
@@ -836,6 +914,7 @@ export async function createEditor(
         .use(formatKeymapPlugin)
         .use(cellClickFixPlugin)
         .use(listSpreadNormalizePlugin)
+        .use(mathInputRulePlugin)
         .create();
 
     isSettled = true;

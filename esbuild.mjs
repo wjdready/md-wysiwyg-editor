@@ -1,5 +1,6 @@
 import * as esbuild from 'esbuild';
 import path from 'path';
+import { copy } from 'esbuild-plugin-copy';
 
 const isProduction = process.argv.includes('--production');
 const isWatch = process.argv.includes('--watch');
@@ -32,12 +33,24 @@ const webviewBuild = {
     format: 'esm',
     splitting: true,
     chunkNames: 'chunks/[name]-[hash]',
+    assetNames: '[name]-[hash]',
     loader: {
-        '.ttf': 'dataurl',
+        '.ttf': 'file',
+        '.woff': 'file',
+        '.woff2': 'file',
     },
     alias: {
         '@': path.resolve('./webview'),
     },
+    plugins: [
+        copy({
+            resolveFrom: 'cwd',
+            assets: {
+                from: ['./node_modules/katex/dist/fonts/*'],
+                to: ['./dist'],
+            },
+        }),
+    ],
 };
 
 if (isWatch) {

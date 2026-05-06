@@ -1,0 +1,133 @@
+/* 数学公式样式 */
+
+/* 行内公式容器 */
+.math-inline-container {
+    display: inline-block;
+    position: relative;
+    vertical-align: middle;
+}
+
+.math-inline-rendered {
+    display: inline;
+    cursor: pointer;
+    vertical-align: middle;
+    padding: 2px 4px;
+    border-radius: 3px;
+}
+
+.math-inline-rendered:hover {
+    background: var(--vscode-textCodeBlock-background, rgba(128, 128, 128, 0.1));
+}
+
+.math-inline-editor-wrapper {
+    display: none;
+    position: absolute;
+    bottom: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    margin-bottom: 8px;
+    padding: 8px;
+    background: var(--vscode-editorWidget-background);
+    border: 1px solid var(--vscode-editorWidget-border);
+    border-radius: 4px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+    min-width: 200px;
+    max-width: 600px;
+    width: auto;
+    z-index: 1000;
+    box-sizing: border-box;
+}
+
+.math-inline-container.editing .math-inline-editor-wrapper {
+    display: block;
+}
+
+.math-inline-editor {
+    width: 100%;
+    min-width: 184px;
+    min-height: 24px;
+    padding: 4px 8px;
+    border: 1px solid var(--vscode-input-border);
+    border-radius: 3px;
+    background: var(--vscode-input-background);
+    color: var(--vscode-input-foreground);
+    font-family: var(--vscode-editor-font-family);
+    font-size: 0.9em;
+    outline: none;
+    resize: none;
+    overflow: hidden;
+    box-sizing: border-box;
+}
+
+.math-inline-editor:focus {
+    border-color: var(--vscode-focusBorder);
+}
+
+/* 块公式容器 */
+.math-block-container {
+    display: block;
+    margin: 1em 0;
+    position: relative;
+    cursor: pointer;
+}
+
+.math-block-container:hover {
+    background: var(--vscode-textCodeBlock-background, rgba(128, 128, 128, 0.05));
+}
+
+.math-editor-wrapper {
+    display: none;
+    position: relative;
+    background: var(--vscode-textCodeBlock-background, rgba(128, 128, 128, 0.1));
+    margin-bottom: 8px;
+    border-radius: 4px;
+}
+
+.math-block-container.editing .math-editor-wrapper {
+    display: block;
+}
+
+.math-block-container.editing {
+    cursor: default;
+}
+
+.math-editor {
+    width: 100%;
+    min-height: 40px;
+    padding: 8px;
+    border: none;
+    background: transparent;
+    color: var(--vscode-editor-foreground);
+    font-family: var(--vscode-editor-font-family, monospace);
+    font-size: 0.9em;
+    line-height: 1.5;
+    resize: none;
+    outline: none;
+    overflow: hidden;
+}
+
+.math-preview {
+    text-align: center;
+    overflow-x: auto;
+    padding: 1em;
+    color: var(--vscode-editor-foreground);
+    background: transparent;
+    min-height: 40px;
+}
+
+.math-block-container.editing .math-preview {
+    background: var(--vscode-textCodeBlock-background, rgba(128, 128, 128, 0.1));
+    border-radius: 4px;
+}
+
+/* KaTeX 样式 */
+.katex {
+    color: var(--vscode-editor-foreground);
+    font-size: 1.2em;
+}
+
+/* KaTeX 错误提示 */
+.katex-error {
+    color: var(--vscode-errorForeground) !important;
+    background: var(--vscode-inputValidation-errorBackground) !important;
+}
