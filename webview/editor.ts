@@ -653,6 +653,29 @@ const listSpreadNormalizePlugin = $prose((ctx) => {
     });
 });
 
+// 确保文档末尾始终有空段落：当最后一个节点不是段落时，自动追加空段落
+// 解决公式块、表格等块级元素作为最后节点时无法在下方继续输入的问题
+const ensureTrailingParagraphPlugin = $prose((ctx) => {
+    const schema = ctx.get(schemaCtx);
+    return new Plugin({
+        appendTransaction(transactions, _oldState, newState) {
+            if (!transactions.some((tr) => tr.docChanged)) return null;
+
+            const { doc } = newState;
+            const lastNode = doc.lastChild;
+
+            // 如果最后一个节点不是段落，或者是非空段落，则追加空段落
+            if (!lastNode || lastNode.type !== schema.nodes.paragraph || lastNode.content.size > 0) {
+                const tr = newState.tr;
+                tr.insert(doc.content.size, schema.nodes.paragraph.create());
+                return tr;
+            }
+
+            return null;
+        },
+    });
+});
+
 const selectionPlugin = $prose(
     () =>
         new Plugin({
@@ -688,33 +711,9 @@ import {
     mathBlockSchema,
     createInlineMathView,
     createMathBlockView,
+    mathInputRulePlugin,
+    mathBlockKeymapPlugin,
 } from "./components/mathBlock";
-
-// 数学公式输入规则：Mod-Shift-m 插入块公式，Mod-m 插入行内公式
-const mathInputRulePlugin = $prose((ctx) => {
-    const schema = ctx.get(schemaCtx);
-
-    return keymap({
-        "Mod-Shift-m": (state, dispatch) => {
-            if (dispatch) {
-                const { from } = state.selection;
-                const tr = state.tr;
-                tr.insert(from, schema.nodes.mathBlock.create({ value: "" }));
-                dispatch(tr);
-            }
-            return true;
-        },
-        "Mod-m": (state, dispatch) => {
-            if (dispatch) {
-                const { from } = state.selection;
-                const tr = state.tr;
-                tr.insert(from, schema.nodes.inlineMath.create({ value: "" }));
-                dispatch(tr);
-            }
-            return true;
-        },
-    });
-});
 
 // ── HTML inline NodeView ───────────────────────────────────────────────────
 // Milkdown 的 html 节点（atom, inline）默认以 textContent 显示原始标签。
@@ -910,11 +909,14 @@ export async function createEditor(
         .use(historyKeymapPlugin)
         .use(listLiftPlugin)
         .use(codeBlockBackspacePlugin)
+        .use(mathBlockKeymapPlugin)
         .use(selectionPlugin)
         .use(formatKeymapPlugin)
         .use(cellClickFixPlugin)
         .use(listSpreadNormalizePlugin)
-        .use(mathInputRulePlugin)
+        .use(ensureTrailingParagraphPlugin)
+        .use(mathInputRulePlugin[0])
+        .use(mathInputRulePlugin[1])
         .create();
 
     isSettled = true;

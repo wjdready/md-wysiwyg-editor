@@ -75,6 +75,8 @@ body {
     margin: 0 auto;
     padding: 56px 48px 80px;
     min-height: 100vh;
+    /* 底部留出至少1个视口高度的空白，让编辑底部内容时可以滚动到屏幕中间 */
+    padding-bottom: max(100vh, 80px);
     outline: none;
 }
 
