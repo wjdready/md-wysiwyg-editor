@@ -172,11 +172,11 @@
     color: var(--vscode-charts-green, #4caf50);
 }
 
-/* 更高特异性（覆盖 .milkdown .editor pre），确保 padding:0 和 flex 布局生效 */
+/* 更高特异性（覆盖 .milkdown .editor pre），确保 padding:0 和 grid 布局生效 */
 .milkdown .editor .code-block-wrapper pre {
-    display: flex;
-    flex-direction: row;
-    align-items: flex-start; /* 允许子元素按内容高度增长，而非被拉伸到容器高度（使 overflow-y 生效） */
+    display: grid;
+    grid-template-columns: auto 1fr;
+    grid-template-rows: 1fr;
     margin: 0;
     padding: 0;
     background: var(
@@ -184,7 +184,7 @@
         rgba(128, 128, 128, 0.1)
     );
     border-radius: 6px;
-    overflow: hidden; /* pre 本身不滚动，滚动由 code 元素处理 */
+    overflow: auto; /* pre 负责滚动，滚动条横跨整个代码块 */
     max-height: var(--code-block-max-height, 500px);
 }
 
@@ -201,14 +201,7 @@
     line-height: 1.5;
     color: var(--vscode-editorLineNumber-foreground, rgba(128, 128, 128, 0.6));
     border-right: none;
-    overflow-y: auto;
-    overflow-x: hidden;
-    max-height: var(--code-block-max-height, 500px);
-    scrollbar-width: none; /* 隐藏滚动条 */
-}
-
-.line-numbers-gutter::-webkit-scrollbar {
-    display: none; /* 隐藏滚动条 */
+    overflow: visible; /* 不自己滚动，跟随 pre 的滚动 */
 }
 
 .line-numbers-gutter span {
@@ -216,7 +209,7 @@
     line-height: 1.5;
 }
 
-/* 更高特异性（覆盖 .milkdown .editor pre code），确保 padding:1em 和 flex:1 生效 */
+/* 更高特异性（覆盖 .milkdown .editor pre code），确保 padding:1em 和样式生效 */
 .milkdown .editor .code-block-wrapper pre code {
     flex: 1;
     min-width: 0;
@@ -226,36 +219,52 @@
     font-size: 0.9em;
     line-height: 1.5; /* 与 .line-numbers-gutter 保持一致，避免行号错位 */
     border-radius: 0;
-    overflow: auto; /* code 元素负责滚动 */
-    max-height: var(--code-block-max-height, 500px);
+    overflow: visible; /* 不自己滚动，跟随 pre 的滚动 */
+    white-space: pre; /* 保持代码格式，允许水平滚动 */
+}
+
+/* code 元素的滚动条样式（现在移到 pre 元素上） */
+.milkdown .editor .code-block-wrapper pre {
     scrollbar-width: thin;
-    scrollbar-color: rgba(128, 128, 128, 0.5) transparent;
+    scrollbar-color: transparent transparent; /* 默认透明 */
 }
 
-/* code 元素的滚动条样式 */
-.milkdown .editor .code-block-wrapper pre code::-webkit-scrollbar {
-    width: 10px;
-    height: 10px;
+/* 悬停时显示滚动条 */
+.milkdown .editor .code-block-wrapper pre:hover {
+    scrollbar-color: rgba(128, 128, 128, 0.3) transparent;
 }
 
-.milkdown .editor .code-block-wrapper pre code::-webkit-scrollbar-track {
+.milkdown .editor .code-block-wrapper pre::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+.milkdown .editor .code-block-wrapper pre::-webkit-scrollbar-track {
     background: transparent;
+    border-radius: 6px; /* 与代码块圆角一致 */
 }
 
-.milkdown .editor .code-block-wrapper pre code::-webkit-scrollbar-thumb {
-    background: rgba(128, 128, 128, 0.5);
-    border-radius: 5px;
+.milkdown .editor .code-block-wrapper pre::-webkit-scrollbar-thumb {
+    background: transparent; /* 默认透明 */
+    border-radius: 4px;
     border: 2px solid transparent;
     background-clip: padding-box;
 }
 
-.milkdown .editor .code-block-wrapper pre code::-webkit-scrollbar-thumb:hover {
-    background: rgba(128, 128, 128, 0.7);
+/* 悬停时显示滚动条 */
+.milkdown .editor .code-block-wrapper pre:hover::-webkit-scrollbar-thumb {
+    background: rgba(128, 128, 128, 0.3);
     background-clip: padding-box;
 }
 
-.milkdown .editor .code-block-wrapper pre code::-webkit-scrollbar-corner {
+.milkdown .editor .code-block-wrapper pre::-webkit-scrollbar-thumb:hover {
+    background: rgba(128, 128, 128, 0.5);
+    background-clip: padding-box;
+}
+
+.milkdown .editor .code-block-wrapper pre::-webkit-scrollbar-corner {
     background: transparent;
+    border-radius: 0 0 6px 0; /* 右下角圆角 */
 }
 
 /* ─── Prism 语法高亮 Token 颜色 ─── */

@@ -492,13 +492,27 @@ export function createCodeBlockView(
 
         const onMove = (ev: MouseEvent) => {
             const newH = Math.max(80, startH + ev.clientY - startY);
+
+            // 记录拖拽前滚动条是否在底部（每次移动时检测）
+            // 现在 pre 是滚动容器
+            const isAtBottom = pre.scrollHeight - pre.scrollTop - pre.clientHeight < 5;
+
             // 同步更新所有相关元素，确保切换模式时高度保持一致
             pre.style.maxHeight = `${newH}px`;
             pre.style.height = `${newH}px`;
-            codeEl.style.maxHeight = `${newH}px`;
-            lineGutter.style.maxHeight = `${newH}px`;
             mermaidPreview.style.maxHeight = `${newH}px`;
             mermaidPreview.style.height = `${newH}px`;
+
+            // 如果滚动条在底部，保持在底部
+            if (isAtBottom) {
+                requestAnimationFrame(() => {
+                    // 强制浏览器重新计算布局
+                    void pre.offsetHeight;
+                    // 精确计算底部位置
+                    const maxScroll = Math.max(0, pre.scrollHeight - pre.clientHeight);
+                    pre.scrollTop = maxScroll;
+                });
+            }
         };
         const onUp = () => {
             document.removeEventListener("mousemove", onMove);
@@ -519,10 +533,8 @@ export function createCodeBlockView(
         }
     });
 
-    // 同步行号栏滚动
-    codeEl.addEventListener("scroll", () => {
-        lineGutter.scrollTop = codeEl.scrollTop;
-    });
+    // 移除旧的滚动同步代码，因为现在不需要了
+    // codeEl 和 lineGutter 都不再独立滚动，它们跟随 pre 的滚动
 
     wrapper.appendChild(header);
     wrapper.appendChild(pre);
