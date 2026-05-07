@@ -493,15 +493,16 @@ function normLineForCompare(line: string): string {
     return normalizeSplitStrong(line);
 }
 
-// ─── 最小化差异合并 ──────────────────────────────────────────────────────────
+// ─── 最小化差异合并（性能优化版）────────────────────────────────────────────
 //
-// 将 remark-stringify 的全量序列化结果与原始文件做 LCS 差量合并：
-// - 空行不参与比较，直接保留原文件中的空行
-// - 表格分隔行纳入比较，但用 normalizeSepRow 忽略 dash 宽度；
-//   对齐标记（:---:）改变时照常应用（表格对齐操作生效）
-// - adjacent strong 拆分（**a** **b** ↔ **a b**）视为等价，不应用
-// - 真正的内容变化（文字增删改）通过 LCS 精确定位并应用
+// 性能优化策略：
+// 1. 快速路径：如果文档较短（<100 行）或变化很小，使用完整 LCS
+// 2. 增量路径：对于长文档，只对可能变更的区域做 LCS，其余部分直接保留
+// 3. 跳过路径：如果序列化结果与保存内容完全相同，直接返回
 function applyMinimalChanges(saved: string, serialized: string): string {
+    // 快速路径：完全相同，直接返回
+    if (saved === serialized) return saved;
+
     interface SigLine { text: string; lineIdx: number }
 
     function sigLines(md: string): SigLine[] {
@@ -515,7 +516,127 @@ function applyMinimalChanges(saved: string, serialized: string): string {
     const serialSig = sigLines(serialized);
     const n = savedSig.length, m = serialSig.length;
 
-    // LCS dp（Uint16Array 控制内存，典型 md 文件不超过 65535 非空行）
+    // 快速路径：短文档（<100 行）使用完整 LCS
+    if (n < 100 && m < 100) {
+        return applyMinimalChangesFullLCS(saved, serialized, savedSig, serialSig, n, m);
+    }
+
+    // 增量路径：找到首尾相同的部分，只对中间变更区域做 LCS
+    let startSame = 0;
+    while (startSame < Math.min(n, m) &&
+           normLineForCompare(savedSig[startSame].text) === normLineForCompare(serialSig[startSame].text)) {
+        startSame++;
+    }
+
+    let endSame = 0;
+    while (endSame < Math.min(n - startSame, m - startSame) &&
+           normLineForCompare(savedSig[n - 1 - endSame].text) === normLineForCompare(serialSig[m - 1 - endSame].text)) {
+        endSame++;
+    }
+
+    // 如果首尾相同部分覆盖了整个文档，说明没有变化
+    if (startSame + endSame >= Math.min(n, m)) {
+        // 只有长度变化（插入或删除），直接应用
+        if (n === m) return saved; // 完全相同
+        // 长度不同，使用完整 LCS（这种情况很少见）
+        return applyMinimalChangesFullLCS(saved, serialized, savedSig, serialSig, n, m);
+    }
+
+    // 只对中间变更区域做 LCS
+    const midSavedSig = savedSig.slice(startSame, n - endSame);
+    const midSerialSig = serialSig.slice(startSame, m - endSame);
+    const midN = midSavedSig.length;
+    const midM = midSerialSig.length;
+
+    // 如果中间区域仍然很大（>500 行），限制 LCS 范围到前后各 250 行
+    const MAX_LCS_SIZE = 500;
+    if (midN > MAX_LCS_SIZE || midM > MAX_LCS_SIZE) {
+        // 对于超大变更，直接使用序列化结果（放弃精确合并）
+        return serialized;
+    }
+
+    // 对中间区域执行 LCS
+    const dp: Uint16Array[] = Array.from({ length: midN + 1 }, () => new Uint16Array(midM + 1));
+    for (let i = 1; i <= midN; i++)
+        for (let j = 1; j <= midM; j++)
+            dp[i][j] = normLineForCompare(midSavedSig[i - 1].text) === normLineForCompare(midSerialSig[j - 1].text)
+                ? dp[i - 1][j - 1] + 1
+                : Math.max(dp[i - 1][j], dp[i][j - 1]);
+
+    // 回溯 → 编辑序列（只针对中间区域）
+    type Edit =
+        | { op: 'keep'; saved: SigLine; serial: SigLine }
+        | { op: 'del';  saved: SigLine }
+        | { op: 'ins';  serial: SigLine };
+    const edits: Edit[] = [];
+    {
+        let i = midN, j = midM;
+        while (i > 0 || j > 0) {
+            if (i > 0 && j > 0 &&
+                normLineForCompare(midSavedSig[i - 1].text) === normLineForCompare(midSerialSig[j - 1].text)) {
+                edits.unshift({ op: 'keep', saved: midSavedSig[i - 1], serial: midSerialSig[j - 1] });
+                i--; j--;
+            } else if (j > 0 && (i === 0 || dp[i][j - 1] >= dp[i - 1][j])) {
+                edits.unshift({ op: 'ins', serial: midSerialSig[j - 1] });
+                j--;
+            } else {
+                edits.unshift({ op: 'del', saved: midSavedSig[i - 1] });
+                i--;
+            }
+        }
+    }
+
+    // 编辑序列 → 文件级修改指令
+    const replacements = new Map<number, string>();
+    const toDelete = new Set<number>();
+    const insertAfter = new Map<number, string[]>();
+
+    let lastSavedLineIdx = startSame > 0 ? savedSig[startSame - 1].lineIdx : -1;
+    let e = 0;
+    while (e < edits.length) {
+        const edit = edits[e];
+        const next = edits[e + 1];
+        if (edit.op === 'del' && next?.op === 'ins') {
+            replacements.set(edit.saved.lineIdx, next.serial.text);
+            lastSavedLineIdx = edit.saved.lineIdx;
+            e += 2;
+        } else if (edit.op === 'del') {
+            toDelete.add(edit.saved.lineIdx);
+            lastSavedLineIdx = edit.saved.lineIdx;
+            e++;
+        } else if (edit.op === 'ins') {
+            const bucket = insertAfter.get(lastSavedLineIdx) ?? [];
+            bucket.push(edit.serial.text);
+            insertAfter.set(lastSavedLineIdx, bucket);
+            e++;
+        } else {
+            lastSavedLineIdx = edit.saved.lineIdx;
+            e++;
+        }
+    }
+
+    if (toDelete.size === 0 && replacements.size === 0 && insertAfter.size === 0) return saved;
+
+    // 重建文件
+    const savedLines = saved.split('\n');
+    const result: string[] = [...(insertAfter.get(-1) ?? [])];
+    for (let lineIdx = 0; lineIdx < savedLines.length; lineIdx++) {
+        if (toDelete.has(lineIdx)) continue;
+        result.push(replacements.has(lineIdx) ? replacements.get(lineIdx)! : savedLines[lineIdx]);
+        for (const ins of (insertAfter.get(lineIdx) ?? [])) result.push(ins);
+    }
+    return result.join('\n');
+}
+
+// 完整 LCS 实现（用于短文档）
+function applyMinimalChangesFullLCS(
+    saved: string,
+    _serialized: string,
+    savedSig: { text: string; lineIdx: number }[],
+    serialSig: { text: string; lineIdx: number }[],
+    n: number,
+    m: number
+): string {
     const dp: Uint16Array[] = Array.from({ length: n + 1 }, () => new Uint16Array(m + 1));
     for (let i = 1; i <= n; i++)
         for (let j = 1; j <= m; j++)
@@ -523,11 +644,10 @@ function applyMinimalChanges(saved: string, serialized: string): string {
                 ? dp[i - 1][j - 1] + 1
                 : Math.max(dp[i - 1][j], dp[i][j - 1]);
 
-    // 回溯 → 编辑序列
     type Edit =
-        | { op: 'keep'; saved: SigLine; serial: SigLine }
-        | { op: 'del';  saved: SigLine }
-        | { op: 'ins';  serial: SigLine };
+        | { op: 'keep'; saved: { text: string; lineIdx: number }; serial: { text: string; lineIdx: number } }
+        | { op: 'del';  saved: { text: string; lineIdx: number } }
+        | { op: 'ins';  serial: { text: string; lineIdx: number } };
     const edits: Edit[] = [];
     {
         let i = n, j = m;
@@ -546,10 +666,9 @@ function applyMinimalChanges(saved: string, serialized: string): string {
         }
     }
 
-    // 编辑序列 → 文件级修改指令
-    const replacements = new Map<number, string>();   // lineIdx → newText
-    const toDelete      = new Set<number>();
-    const insertAfter   = new Map<number, string[]>(); // lineIdx (-1=头部) → lines
+    const replacements = new Map<number, string>();
+    const toDelete = new Set<number>();
+    const insertAfter = new Map<number, string[]>();
 
     let lastSavedLineIdx = -1;
     let e = 0;
@@ -557,7 +676,6 @@ function applyMinimalChanges(saved: string, serialized: string): string {
         const edit = edits[e];
         const next = edits[e + 1];
         if (edit.op === 'del' && next?.op === 'ins') {
-            // del + ins = 替换
             replacements.set(edit.saved.lineIdx, next.serial.text);
             lastSavedLineIdx = edit.saved.lineIdx;
             e += 2;
@@ -570,7 +688,7 @@ function applyMinimalChanges(saved: string, serialized: string): string {
             bucket.push(edit.serial.text);
             insertAfter.set(lastSavedLineIdx, bucket);
             e++;
-        } else { // keep
+        } else {
             lastSavedLineIdx = edit.saved.lineIdx;
             e++;
         }
@@ -578,7 +696,6 @@ function applyMinimalChanges(saved: string, serialized: string): string {
 
     if (toDelete.size === 0 && replacements.size === 0 && insertAfter.size === 0) return saved;
 
-    // 重建文件
     const savedLines = saved.split('\n');
     const result: string[] = [...(insertAfter.get(-1) ?? [])];
     for (let lineIdx = 0; lineIdx < savedLines.length; lineIdx++) {
@@ -637,9 +754,18 @@ function serializeTableNoAlign(node: any, _parent: any, state: any): string {
 // 仅对实际变更范围内的列表节点做规范化，避免编辑表格时全文档列表间距被重置
 const listSpreadNormalizePlugin = $prose((ctx) => {
     const schema = ctx.get(schemaCtx);
+    // 节流：最多每 100ms 执行一次，避免连续输入时频繁触发
+    let lastRunTime = 0;
+    const THROTTLE_MS = 100;
+
     return new Plugin({
         appendTransaction(transactions, _oldState, newState) {
             if (!transactions.some((tr) => tr.docChanged)) return null;
+
+            // 节流检查：如果距离上次执行 < 100ms，跳过本次
+            const now = Date.now();
+            if (now - lastRunTime < THROTTLE_MS) return null;
+            lastRunTime = now;
 
             // 收集所有变更在新文档中的位置范围
             let minFrom = newState.doc.content.size;
@@ -654,6 +780,12 @@ const listSpreadNormalizePlugin = $prose((ctx) => {
                 }
             }
             if (minFrom > maxTo) return null;
+
+            // 扩展范围到段落边界，避免遗漏列表节点
+            const $from = newState.doc.resolve(Math.max(0, minFrom - 1));
+            const $to = newState.doc.resolve(Math.min(newState.doc.content.size, maxTo + 1));
+            minFrom = $from.before(Math.max(1, $from.depth));
+            maxTo = $to.after(Math.max(1, $to.depth));
 
             const tr = newState.tr;
             let changed = false;
@@ -984,10 +1116,22 @@ export async function createEditor(
     // 防止拼音中间态被保存到文件
     let isComposing = false;
     let pendingMd: string | null = null;
+    // 输入活跃标记：连续输入时延长防抖，避免频繁序列化
+    let lastInputTime = 0;
 
     const fireUpdate = (md: string) => {
         clearTimeout(debounceTimer);
-        debounceTimer = setTimeout(() => onUpdate(md), 300);
+        const now = Date.now();
+        const timeSinceLastInput = now - lastInputTime;
+        lastInputTime = now;
+
+        // 如果距离上次输入 < 200ms，说明正在连续输入，延长防抖到 1500ms
+        // 否则使用正常防抖 600ms
+        const delay = timeSinceLastInput < 200 ? 1500 : 600;
+
+        debounceTimer = setTimeout(() => {
+            onUpdate(md);
+        }, delay);
     };
     const debouncedUpdate = (md: string) => {
         if (isComposing) {
