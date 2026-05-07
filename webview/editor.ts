@@ -1184,12 +1184,12 @@ export async function createEditor(
             ctx.get(listenerCtx).markdownUpdated((_ctx, markdown) => {
                 if (!isSettled) return;          // 跳过初始化同步触发
                 if (!_hasUserInteracted) return; // 跳过初始化异步触发（RAF/microtask 延迟交付）
+
+                // 简化同步：输入期间只做基本处理，跳过昂贵的 LCS 和格式化
                 const restored = restoreMathBlockFormats(markdown);
-                const merged = applyMinimalChanges(_savedMarkdown, restored);
-                const toSave = ensureBlockSpacing(merged);
-                if (toSave === _savedMarkdown) return; // 内容无实质变化，不触发保存
-                _savedMarkdown = toSave;
-                debouncedUpdate(toSave);
+                if (restored === _savedMarkdown) return; // 内容无实质变化，不触发保存
+                _savedMarkdown = restored;
+                debouncedUpdate(restored);
             });
             // 配置 prism：使用我们已注册语言的 refractor 实例
             ctx.set(prismConfig.key, {
