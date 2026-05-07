@@ -60,10 +60,7 @@ const listLiftPlugin = $prose((ctx) => {
                 return false;
             }
             const { $from } = selection;
-            // 仅当光标在段落行首时触发
-            if ($from.parentOffset !== 0) {
-                return false;
-            }
+
             // 找到当前所在的 list_item
             let listItemDepth = -1;
             for (let d = $from.depth; d >= 0; d--) {
@@ -83,11 +80,52 @@ const listLiftPlugin = $prose((ctx) => {
                                listItem.firstChild?.type === schema.nodes.paragraph &&
                                listItem.firstChild.content.size === 0;
 
+            console.log('[listLiftPlugin] Backspace pressed', {
+                listItemDepth,
+                childCount: listItem.childCount,
+                firstChildType: listItem.firstChild?.type.name,
+                contentSize: listItem.firstChild?.content.size,
+                isEmptyItem,
+                parentOffset: $from.parentOffset,
+            });
+
             if (isEmptyItem && dispatch) {
-                // 删除整个空列表项
+                console.log('[listLiftPlugin] Deleting empty list item');
                 const listItemPos = $from.before(listItemDepth);
-                dispatch(state.tr.delete(listItemPos, listItemPos + listItem.nodeSize));
+
+                // 检查是否是嵌套列表中的唯一项
+                // 如果是，需要删除整个嵌套列表，而不仅仅是列表项
+                let deleteStart = listItemPos;
+                let deleteEnd = listItemPos + listItem.nodeSize;
+
+                // 检查父节点是否是列表
+                if (listItemDepth > 1) {
+                    const parentDepth = listItemDepth - 1;
+                    const parentNode = $from.node(parentDepth);
+                    // 如果父节点是列表且只有一个子项（就是当前这个空列表项）
+                    if ((parentNode.type === schema.nodes.bullet_list ||
+                         parentNode.type === schema.nodes.ordered_list) &&
+                        parentNode.childCount === 1) {
+                        // 删除整个父列表
+                        deleteStart = $from.before(parentDepth);
+                        deleteEnd = deleteStart + parentNode.nodeSize;
+                        console.log('[listLiftPlugin] Deleting entire nested list');
+                    }
+                }
+
+                const tr = state.tr.delete(deleteStart, deleteEnd);
+                // 删除后，光标移动到前一个块的末尾
+                if (deleteStart > 0) {
+                    const $pos = tr.doc.resolve(deleteStart - 1);
+                    tr.setSelection(TextSelection.near($pos, -1));
+                }
+                dispatch(tr);
                 return true;
+            }
+
+            // 非空列表项：仅当光标在段落行首时才提升层级
+            if ($from.parentOffset !== 0) {
+                return false;
             }
 
             // 非空列表项：执行原来的提升层级操作
@@ -204,6 +242,150 @@ const codeBlockTabPlugin = $prose((ctx) => {
                 }
             }
             return false;
+        },
+    });
+});
+
+// Ctrl+X 剪切当前行：当没有选中内容时，剪切光标所在行的文本内容
+const cutLinePlugin = $prose((ctx) => {
+    const schema = ctx.get(schemaCtx);
+    return keymap({
+        "Mod-x": (state, dispatch, view) => {
+            const { selection } = state;
+
+            // 如果有选中内容，使用默认行为
+            if (!selection.empty) {
+                return false;
+            }
+
+            const { $from } = selection;
+            const parent = $from.parent;
+
+            // 检查是否在空列表项中（空列表项特殊处理：删除整个列表项）
+            const listItemType = schema.nodes["list_item"];
+            if (listItemType) {
+                let listItemDepth = -1;
+                for (let d = $from.depth; d >= 0; d--) {
+                    if ($from.node(d).type === listItemType) {
+                        listItemDepth = d;
+                        break;
+                    }
+                }
+
+                if (listItemDepth !== -1) {
+                    const listItem = $from.node(listItemDepth);
+                    const isEmptyItem = listItem.childCount === 1 &&
+                                       listItem.firstChild?.type === schema.nodes.paragraph &&
+                                       listItem.firstChild.content.size === 0;
+
+                    if (isEmptyItem && dispatch) {
+                        // 空列表项：删除整个列表项
+                        const listItemPos = $from.before(listItemDepth);
+                        let deleteStart = listItemPos;
+                        let deleteEnd = listItemPos + listItem.nodeSize;
+
+                        // 检查是否是嵌套列表中的唯一项
+                        if (listItemDepth > 1) {
+                            const parentDepth = listItemDepth - 1;
+                            const parentNode = $from.node(parentDepth);
+                            if ((parentNode.type === schema.nodes.bullet_list ||
+                                 parentNode.type === schema.nodes.ordered_list) &&
+                                parentNode.childCount === 1) {
+                                deleteStart = $from.before(parentDepth);
+                                deleteEnd = deleteStart + parentNode.nodeSize;
+                            }
+                        }
+
+                        const tr = state.tr.delete(deleteStart, deleteEnd);
+                        if (deleteStart > 0) {
+                            const $pos = tr.doc.resolve(deleteStart - 1);
+                            tr.setSelection(TextSelection.near($pos, -1));
+                        }
+                        dispatch(tr);
+                        return true;
+                    }
+                }
+            }
+
+            if (dispatch) {
+                // 如果父节点是空的，删除整个块级节点
+                if (parent.content.size === 0) {
+                    const nodeStart = $from.before($from.depth);
+                    const nodeEnd = $from.after($from.depth);
+                    const tr = state.tr.delete(nodeStart, nodeEnd);
+                    dispatch(tr);
+                    return true;
+                }
+
+                // 检查是否在代码块或其他包含多行文本的节点中
+                const isCodeBlock = parent.type === schema.nodes.code_block;
+                const isMathBlock = parent.type === schema.nodes.mathBlock;
+
+                if (isCodeBlock || isMathBlock) {
+                    // 代码块/公式块：删除当前行
+                    const text = parent.textContent;
+                    const cursorPos = $from.parentOffset;
+
+                    // 找到当前行的开始和结束位置
+                    let lineStart = text.lastIndexOf('\n', cursorPos - 1) + 1;
+                    let lineEnd = text.indexOf('\n', cursorPos);
+                    if (lineEnd === -1) lineEnd = text.length;
+
+                    const lineContent = text.substring(lineStart, lineEnd);
+
+                    // 复制到剪贴板
+                    navigator.clipboard?.writeText(lineContent).catch(() => {
+                        const textarea = document.createElement("textarea");
+                        textarea.value = lineContent;
+                        textarea.style.cssText = "position:fixed;top:0;left:0;opacity:0;pointer-events:none";
+                        document.body.appendChild(textarea);
+                        textarea.select();
+                        try { document.execCommand("copy"); } catch { /* ignore */ }
+                        document.body.removeChild(textarea);
+                    });
+
+                    // 删除当前行（包括换行符）
+                    const blockStart = $from.start($from.depth);
+                    const deleteStart = blockStart + lineStart;
+                    let deleteEnd = blockStart + lineEnd;
+
+                    // 如果不是最后一行，删除换行符
+                    if (lineEnd < text.length) {
+                        deleteEnd += 1;
+                    } else if (lineStart > 0) {
+                        // 如果是最后一行且不是第一行，删除前面的换行符
+                        const tr = state.tr.delete(blockStart + lineStart - 1, deleteEnd);
+                        dispatch(tr);
+                        return true;
+                    }
+
+                    const tr = state.tr.delete(deleteStart, deleteEnd);
+                    dispatch(tr);
+                    return true;
+                }
+
+                // 其他块（段落、标题等）：删除当前行的文本内容
+                const startPos = $from.start($from.depth);
+                const endPos = $from.end($from.depth);
+                const content = state.doc.textBetween(startPos, endPos, "\n");
+
+                // 复制到剪贴板
+                navigator.clipboard?.writeText(content).catch(() => {
+                    const textarea = document.createElement("textarea");
+                    textarea.value = content;
+                    textarea.style.cssText = "position:fixed;top:0;left:0;opacity:0;pointer-events:none";
+                    document.body.appendChild(textarea);
+                    textarea.select();
+                    try { document.execCommand("copy"); } catch { /* ignore */ }
+                    document.body.removeChild(textarea);
+                });
+
+                // 删除当前行的文本内容（保留块级节点）
+                const tr = state.tr.delete(startPos, endPos);
+                dispatch(tr);
+            }
+
+            return true;
         },
     });
 });
@@ -1254,6 +1436,7 @@ export async function createEditor(
         .use(selectionPlugin)
         .use(formatKeymapPlugin)
         .use(codeBlockTabPlugin)
+        .use(cutLinePlugin)
         .use(cellClickFixPlugin)
         .use(listSpreadNormalizePlugin)
         .use(ensureTrailingParagraphPlugin)
