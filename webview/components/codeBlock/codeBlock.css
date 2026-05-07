@@ -4,20 +4,34 @@
     border-radius: 6px;
     /* overflow: visible 保留，避免裁剪语言下拉菜单 */
     border: none;
+    position: relative;
 }
 
 .code-block-header {
+    position: absolute;
+    top: -2.5em;
+    right: 0;
+    z-index: 10;
     display: flex;
     align-items: center;
-    /* 移除 justify-content:space-between，改用 spacer flex:1 推右侧按钮 */
     padding: 4px 8px;
-    background: var(
-        --vscode-textCodeBlock-background,
-        rgba(128, 128, 128, 0.1)
-    );
-    border-bottom: none;
+    background: rgba(128, 128, 128, 0.15);
+    border: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.3));
     gap: 4px;
-    border-radius: 6px 6px 0 0;
+    border-radius: 4px;
+    opacity: 0;
+    transition: opacity 0.2s;
+    backdrop-filter: blur(12px);
+    pointer-events: none;
+}
+
+/* 只在鼠标悬停在代码块内容区域或 header 自身时显示 header */
+.code-block-wrapper:has(pre:hover) .code-block-header,
+.code-block-wrapper:has(.mermaid-preview:hover) .code-block-header,
+.code-block-wrapper:has(.code-block-header:hover) .code-block-header,
+.code-block-wrapper:focus-within .code-block-header {
+    opacity: 1;
+    pointer-events: auto;
 }
 
 /* ─── lang-picker 自定义搜索下拉 ─── */
@@ -169,14 +183,14 @@
         --vscode-textCodeBlock-background,
         rgba(128, 128, 128, 0.1)
     );
-    border-radius: 0 0 6px 6px;
+    border-radius: 6px;
     overflow: hidden; /* pre 本身不滚动，滚动由 code 元素处理 */
     max-height: var(--code-block-max-height, 500px);
 }
 
 /* 行号侧栏 */
 .line-numbers-gutter {
-    padding: 0.5em 0.75em;
+    padding: 1em 0.75em;
     min-width: 2.5em;
     text-align: right;
     user-select: none;
@@ -187,7 +201,14 @@
     line-height: 1.5;
     color: var(--vscode-editorLineNumber-foreground, rgba(128, 128, 128, 0.6));
     border-right: none;
-    pointer-events: none; /* 防止行号栏拦截鼠标事件，避免干扰代码区的拖拽选择 */
+    overflow-y: auto;
+    overflow-x: hidden;
+    max-height: var(--code-block-max-height, 500px);
+    scrollbar-width: none; /* 隐藏滚动条 */
+}
+
+.line-numbers-gutter::-webkit-scrollbar {
+    display: none; /* 隐藏滚动条 */
 }
 
 .line-numbers-gutter span {
@@ -199,7 +220,7 @@
 .milkdown .editor .code-block-wrapper pre code {
     flex: 1;
     min-width: 0;
-    padding: 0.5em 1em;
+    padding: 1em 1em;
     padding-right: 1.5em; /* 右侧额外留出空间，避免被滚动条遮挡 */
     background: none;
     font-size: 0.9em;

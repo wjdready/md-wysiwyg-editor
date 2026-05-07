@@ -496,6 +496,7 @@ export function createCodeBlockView(
             pre.style.maxHeight = `${newH}px`;
             pre.style.height = `${newH}px`;
             codeEl.style.maxHeight = `${newH}px`;
+            lineGutter.style.maxHeight = `${newH}px`;
             mermaidPreview.style.maxHeight = `${newH}px`;
             mermaidPreview.style.height = `${newH}px`;
         };
@@ -516,6 +517,11 @@ export function createCodeBlockView(
             sel?.removeAllRanges();
             sel?.addRange(range);
         }
+    });
+
+    // 同步行号栏滚动
+    codeEl.addEventListener("scroll", () => {
+        lineGutter.scrollTop = codeEl.scrollTop;
     });
 
     wrapper.appendChild(header);
