@@ -96,7 +96,8 @@ const listLiftPlugin = $prose((ctx) => {
     });
 });
 
-// 代码块 Backspace：光标在代码块后的段落行首时，选中代码块而非进入其内部
+// 代码块/公式块后的空段落 Backspace：删除空段落本身，而不是选中前面的块
+// 只有当段落有内容时，才选中前面的代码块/公式块
 const codeBlockBackspacePlugin = $prose(() =>
     keymap({
         Backspace: (state, dispatch) => {
@@ -105,12 +106,31 @@ const codeBlockBackspacePlugin = $prose(() =>
                 return false;
             }
             const $from = selection.$from;
+            const parent = $from.parent;
+
+            // 如果当前段落为空，直接删除段落本身
+            if (parent.type.name === "paragraph" && parent.content.size === 0) {
+                const startOfBlock = $from.before($from.depth);
+                if (startOfBlock === 0) {
+                    return false;
+                }
+                const nodeBefore = state.doc.resolve(startOfBlock).nodeBefore;
+                if (nodeBefore && (nodeBefore.type.name === "code_block" || nodeBefore.type.name === "mathBlock")) {
+                    // 删除空段落
+                    if (dispatch) {
+                        dispatch(state.tr.delete(startOfBlock, startOfBlock + parent.nodeSize));
+                    }
+                    return true;
+                }
+            }
+
+            // 如果段落有内容，选中前面的代码块/公式块
             const startOfBlock = $from.before($from.depth);
             if (startOfBlock === 0) {
                 return false;
             }
             const nodeBefore = state.doc.resolve(startOfBlock).nodeBefore;
-            if (!nodeBefore || nodeBefore.type.name !== "code_block") {
+            if (!nodeBefore || (nodeBefore.type.name !== "code_block" && nodeBefore.type.name !== "mathBlock")) {
                 return false;
             }
             if (dispatch) {
@@ -708,8 +728,8 @@ const ensureTrailingParagraphPlugin = $prose((ctx) => {
             const { doc } = newState;
             const lastNode = doc.lastChild;
 
-            // 如果最后一个节点不是段落，或者是非空段落，则追加空段落
-            if (!lastNode || lastNode.type !== schema.nodes.paragraph || lastNode.content.size > 0) {
+            // 只在最后一个节点不是段落时追加空段落
+            if (!lastNode || lastNode.type !== schema.nodes.paragraph) {
                 const tr = newState.tr;
                 tr.insert(doc.content.size, schema.nodes.paragraph.create());
                 return tr;
@@ -815,14 +835,30 @@ function restoreMathBlockFormats(markdown: string): string {
 
 // 确保块级元素之间有空行：段落、标题、列表、代码块、公式块、表格、引用等
 // 同时清理多余的空行（超过1个连续空行）
+// 代码块内部内容保持原样，不做任何修改
 function ensureBlockSpacing(markdown: string): string {
     const lines = markdown.split('\n');
     const result: string[] = [];
     let consecutiveEmptyLines = 0;
+    let inCodeBlock = false;
 
     for (let i = 0; i < lines.length; i++) {
         const line = lines[i];
         const nextLine = i < lines.length - 1 ? lines[i + 1] : '';
+
+        // 检测代码块围栏（``` 开头）
+        if (/^```/.test(line.trim())) {
+            inCodeBlock = !inCodeBlock;
+            consecutiveEmptyLines = 0;
+            result.push(line);
+            continue;
+        }
+
+        // 代码块内部：保持原样，不做任何处理
+        if (inCodeBlock) {
+            result.push(line);
+            continue;
+        }
 
         // 如果是空行，计数
         if (line.trim() === '') {
@@ -875,9 +911,8 @@ function shouldHaveSpaceBetween(line1: string, line2: string): boolean {
     // 引用块内部不需要空行
     if (isBlockquote(trim1) && isBlockquote(trim2)) return false;
 
-    // 代码块围栏标记（```）本身不需要空行，但围栏外需要
-    if (isCodeFence(trim1) && !isCodeFence(trim2)) return false; // ``` 后面是代码内容
-    if (!isCodeFence(trim1) && isCodeFence(trim2)) return false; // 代码内容后面是 ```
+    // 代码块围栏（```）和其他块之间需要空行
+    if (isCodeFence(trim1) || isCodeFence(trim2)) return true;
 
     // 公式块围栏标记（$$）的处理
     // 多行公式内部（$$ 和公式内容之间）不需要空行

@@ -421,8 +421,23 @@ export function createMathBlockView(
     };
 
     editor.onkeydown = (e) => {
+        // Ctrl+Enter：跳出公式块，在下方插入新段落
+        if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+            e.preventDefault();
+            const pos = getPos();
+            if (pos !== undefined) {
+                const tr = view.state.tr.insert(
+                    pos + node.nodeSize,
+                    view.state.schema.nodes.paragraph.create()
+                );
+                // 光标移到新段落开头
+                tr.setSelection(TextSelection.create(tr.doc, pos + node.nodeSize + 1));
+                view.dispatch(tr);
+                view.focus();
+            }
+        }
         // 空内容时按回车键：删除整个公式块，插入新段落
-        if (e.key === "Enter" && editor.value === "") {
+        else if (e.key === "Enter" && editor.value === "") {
             e.preventDefault();
             const pos = getPos();
             if (pos !== undefined) {
