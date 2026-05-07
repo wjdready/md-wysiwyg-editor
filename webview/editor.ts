@@ -43,7 +43,9 @@ const historyKeymapPlugin = $prose(() =>
     }),
 );
 
-// 列表 Backspace：光标在行首时，层级 ≥2 → 上升一级；层级 1 → 同样上升（变为普通段落）
+// 列表 Backspace：光标在行首时的智能处理
+// 1. 如果列表项只包含空段落 → 删除整个列表项（防止列表分割、序号重置）
+// 2. 否则 → 层级 ≥2 上升一级；层级 1 上升为普通段落
 const listLiftPlugin = $prose((ctx) => {
     const schema = ctx.get(schemaCtx);
     const listItemType = schema.nodes["list_item"];
@@ -62,17 +64,33 @@ const listLiftPlugin = $prose((ctx) => {
             if ($from.parentOffset !== 0) {
                 return false;
             }
-            // 确认当前在 list_item 内
-            let inList = false;
+            // 找到当前所在的 list_item
+            let listItemDepth = -1;
             for (let d = $from.depth; d >= 0; d--) {
                 if ($from.node(d).type === listItemType) {
-                    inList = true;
+                    listItemDepth = d;
                     break;
                 }
             }
-            if (!inList) {
+            if (listItemDepth === -1) {
                 return false;
             }
+
+            const listItem = $from.node(listItemDepth);
+
+            // 检查列表项是否只包含一个空段落
+            const isEmptyItem = listItem.childCount === 1 &&
+                               listItem.firstChild?.type === schema.nodes.paragraph &&
+                               listItem.firstChild.content.size === 0;
+
+            if (isEmptyItem && dispatch) {
+                // 删除整个空列表项
+                const listItemPos = $from.before(listItemDepth);
+                dispatch(state.tr.delete(listItemPos, listItemPos + listItem.nodeSize));
+                return true;
+            }
+
+            // 非空列表项：执行原来的提升层级操作
             return doLift(state, dispatch);
         },
     });
@@ -593,8 +611,9 @@ function serializeTableNoAlign(node: any, _parent: any, state: any): string {
     return lines.join('\n');
 }
 
-// 列表 spread 规范化：编辑后若列表项只含单个块级子节点，自动将 spread 重置为 false
-// 防止删除嵌套子列表后，原 loose list 的 spread:true 残留导致序列化时插入多余空行
+// 列表 spread 规范化 + 空列表项清理：
+// 1. 编辑后若列表项只含单个块级子节点，自动将 spread 重置为 false
+// 2. 清理空列表项（防止列表分割、序号重置），但保留用户正在创建的新项
 // 仅对实际变更范围内的列表节点做规范化，避免编辑表格时全文档列表间距被重置
 const listSpreadNormalizePlugin = $prose((ctx) => {
     const schema = ctx.get(schemaCtx);
@@ -618,6 +637,10 @@ const listSpreadNormalizePlugin = $prose((ctx) => {
 
             const tr = newState.tr;
             let changed = false;
+            const toDelete: { pos: number; size: number }[] = [];
+
+            // 获取当前光标位置，避免删除用户正在编辑的列表项
+            const cursorPos = newState.selection.$from.pos;
 
             // nodesBetween 会访问与范围重叠的所有节点（含祖先节点如 bullet_list）
             newState.doc.nodesBetween(minFrom, maxTo, (node, pos) => {
@@ -629,15 +652,28 @@ const listSpreadNormalizePlugin = $prose((ctx) => {
                 let listNeedsSpread = false;
                 let offset = 1; // 跳过列表节点自身的开标记
                 node.forEach((item) => {
-                    const itemNeedsSpread = item.childCount > 1;
-                    if (item.attrs.spread !== itemNeedsSpread) {
-                        tr.setNodeMarkup(pos + offset, undefined, {
-                            ...item.attrs,
-                            spread: itemNeedsSpread,
-                        });
-                        changed = true;
+                    const itemPos = pos + offset;
+                    const itemEnd = itemPos + item.nodeSize;
+
+                    // 检查列表项是否为空（只包含空段落）
+                    const isEmpty = item.childCount === 1 &&
+                                   item.firstChild?.type === schema.nodes.paragraph &&
+                                   item.firstChild.content.size === 0;
+
+                    // 只删除不包含光标的空列表项
+                    if (isEmpty && !(cursorPos >= itemPos && cursorPos <= itemEnd)) {
+                        toDelete.push({ pos: itemPos, size: item.nodeSize });
+                    } else if (!isEmpty) {
+                        const itemNeedsSpread = item.childCount > 1;
+                        if (item.attrs.spread !== itemNeedsSpread) {
+                            tr.setNodeMarkup(itemPos, undefined, {
+                                ...item.attrs,
+                                spread: itemNeedsSpread,
+                            });
+                            changed = true;
+                        }
+                        if (itemNeedsSpread) listNeedsSpread = true;
                     }
-                    if (itemNeedsSpread) listNeedsSpread = true;
                     offset += item.nodeSize;
                 });
                 if (node.attrs.spread !== listNeedsSpread) {
@@ -648,6 +684,14 @@ const listSpreadNormalizePlugin = $prose((ctx) => {
                     changed = true;
                 }
             });
+
+            // 从后往前删除空列表项，避免位置偏移
+            toDelete.sort((a, b) => b.pos - a.pos);
+            for (const { pos, size } of toDelete) {
+                tr.delete(pos, pos + size);
+                changed = true;
+            }
+
             return changed ? tr : null;
         },
     });
@@ -769,6 +813,98 @@ function restoreMathBlockFormats(markdown: string): string {
     );
 }
 
+// 确保块级元素之间有空行：段落、标题、列表、代码块、公式块、表格、引用等
+// 同时清理多余的空行（超过1个连续空行）
+function ensureBlockSpacing(markdown: string): string {
+    const lines = markdown.split('\n');
+    const result: string[] = [];
+    let consecutiveEmptyLines = 0;
+
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        const nextLine = i < lines.length - 1 ? lines[i + 1] : '';
+
+        // 如果是空行，计数
+        if (line.trim() === '') {
+            consecutiveEmptyLines++;
+            // 只保留第一个空行，丢弃后续的连续空行
+            if (consecutiveEmptyLines === 1) {
+                result.push(line);
+            }
+            continue;
+        }
+
+        // 非空行，重置计数
+        consecutiveEmptyLines = 0;
+        result.push(line);
+
+        // 如果当前行非空，下一行也非空，且它们之间应该有空行
+        if (nextLine.trim() !== '') {
+            const needsSpace = shouldHaveSpaceBetween(line, nextLine);
+            if (needsSpace) {
+                // 检查下一行前面是否已经有空行
+                const hasEmptyLineBefore = i + 1 < lines.length && lines[i + 1].trim() === '';
+                if (!hasEmptyLineBefore) {
+                    result.push('');
+                }
+            }
+        }
+    }
+
+    return result.join('\n');
+}
+
+function shouldHaveSpaceBetween(line1: string, line2: string): boolean {
+    const trim1 = line1.trim();
+    const trim2 = line2.trim();
+
+    // 块级元素的特征
+    const isHeading = (s: string) => /^#{1,6}\s/.test(s);
+    const isListItem = (s: string) => /^[\s]*[-*+]\s/.test(s) || /^[\s]*\d+\.\s/.test(s);
+    const isCodeFence = (s: string) => /^```/.test(s);
+    const isMathBlockFence = (s: string) => /^\$\$$/.test(s); // 仅 $$ 开头（多行公式的开始/结束）
+    const isMathBlockInline = (s: string) => /^\$\$ .+ \$\$$/.test(s); // 单行公式 $$ ... $$
+    const isTableRow = (s: string) => /^\|.*\|$/.test(s);
+    const isBlockquote = (s: string) => /^>/.test(s);
+    const isHr = (s: string) => /^(---+|\*\*\*+|___+)$/.test(s);
+    const isIndented = (s: string) => /^[\s]{2,}/.test(s); // 缩进内容（列表项的子内容）
+
+    // 表格行之间不需要空行
+    if (isTableRow(trim1) && isTableRow(trim2)) return false;
+
+    // 引用块内部不需要空行
+    if (isBlockquote(trim1) && isBlockquote(trim2)) return false;
+
+    // 代码块围栏标记（```）本身不需要空行，但围栏外需要
+    if (isCodeFence(trim1) && !isCodeFence(trim2)) return false; // ``` 后面是代码内容
+    if (!isCodeFence(trim1) && isCodeFence(trim2)) return false; // 代码内容后面是 ```
+
+    // 公式块围栏标记（$$）的处理
+    // 多行公式内部（$$ 和公式内容之间）不需要空行
+    if (isMathBlockFence(trim1) && !isMathBlockFence(trim2) && !isMathBlockInline(trim1)) return false; // $$ 后面是公式内容
+    if (!isMathBlockFence(trim1) && isMathBlockFence(trim2) && !isMathBlockInline(trim2)) return false; // 公式内容后面是 $$
+
+    // 单行公式（$$ ... $$）前后需要空行
+    if (isMathBlockInline(trim1) || isMathBlockInline(trim2)) return true;
+
+    // 列表项和其第一个缩进内容之间不需要空行
+    if (isListItem(line1) && isIndented(line2)) return false;
+
+    // 缩进内容段落之间需要空行
+    if (isIndented(line1) && isIndented(line2)) return true;
+
+    // 缩进内容和下一个列表项之间需要空行
+    if (isIndented(line1) && isListItem(line2)) return true;
+
+    // 其他情况：标题、段落、列表项、不同类型的块之间需要空行
+    if (isHeading(trim1) || isHeading(trim2)) return true;
+    if (isHr(trim1) || isHr(trim2)) return true;
+    if (isListItem(trim1) || isListItem(trim2)) return true;
+
+    // 普通段落之间需要空行
+    return true;
+}
+
 // 上次保存/加载的 Markdown 原文（含用户原始格式：空行、分隔线宽度等）
 // 用于在自动保存时做最小化差异合并，避免全量序列化改变未编辑区域的格式
 let _savedMarkdown = '';
@@ -852,6 +988,7 @@ export async function createEditor(
                 ...prev,
                 bullet: '-' as const,
                 rule: '-' as const,   // 保留 --- 分割线，防止序列化为 ***
+                fences: true,         // 使用围栏式代码块（```）
                 handlers: {
                     ...(prev.handlers ?? {}),
                     // 覆盖 remark-gfm 的 table handler：每列保持自然宽度，
@@ -869,7 +1006,8 @@ export async function createEditor(
                 if (!isSettled) return;          // 跳过初始化同步触发
                 if (!_hasUserInteracted) return; // 跳过初始化异步触发（RAF/microtask 延迟交付）
                 const restored = restoreMathBlockFormats(markdown);
-                const toSave = applyMinimalChanges(_savedMarkdown, restored);
+                const merged = applyMinimalChanges(_savedMarkdown, restored);
+                const toSave = ensureBlockSpacing(merged);
                 if (toSave === _savedMarkdown) return; // 内容无实质变化，不触发保存
                 _savedMarkdown = toSave;
                 debouncedUpdate(toSave);
