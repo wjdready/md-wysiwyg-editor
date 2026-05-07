@@ -3,7 +3,7 @@
     margin: 0 0 1em;
     border-radius: 6px;
     /* overflow: visible 保留，避免裁剪语言下拉菜单 */
-    border: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.25));
+    border: none;
 }
 
 .code-block-header {
@@ -12,11 +12,10 @@
     /* 移除 justify-content:space-between，改用 spacer flex:1 推右侧按钮 */
     padding: 4px 8px;
     background: var(
-        --vscode-editor-lineHighlightBackground,
-        rgba(128, 128, 128, 0.12)
+        --vscode-textCodeBlock-background,
+        rgba(128, 128, 128, 0.1)
     );
-    border-bottom: 1px solid
-        var(--vscode-panel-border, rgba(128, 128, 128, 0.2));
+    border-bottom: none;
     gap: 4px;
     border-radius: 6px 6px 0 0;
 }
@@ -30,16 +29,20 @@
     display: inline-flex;
     align-items: center;
     gap: 4px;
-    background: var(--vscode-input-background, rgba(128, 128, 128, 0.1));
-    border: 1px solid var(--vscode-input-border, rgba(128, 128, 128, 0.4));
-    color: var(--vscode-input-foreground, var(--vscode-editor-foreground));
-    border-radius: 4px;
+    background: transparent;
+    border: 1px solid transparent;
+    color: var(--vscode-editor-foreground);
+    border-radius: 3px;
     padding: 2px 6px;
     font-size: 12px;
     font-family: inherit;
     cursor: pointer;
     height: 22px;
     white-space: nowrap;
+    opacity: 0.6;
+    transition:
+        opacity 0.1s,
+        background 0.1s;
 }
 
 .lang-picker-btn:hover {
@@ -167,14 +170,13 @@
         rgba(128, 128, 128, 0.1)
     );
     border-radius: 0 0 6px 6px;
-    overflow-x: auto;
-    overflow-y: auto;
+    overflow: hidden; /* pre 本身不滚动，滚动由 code 元素处理 */
     max-height: var(--code-block-max-height, 500px);
 }
 
 /* 行号侧栏 */
 .line-numbers-gutter {
-    padding: 1em 0.75em;
+    padding: 0.5em 0.75em;
     min-width: 2.5em;
     text-align: right;
     user-select: none;
@@ -184,7 +186,7 @@
     font-size: 0.9em;
     line-height: 1.5;
     color: var(--vscode-editorLineNumber-foreground, rgba(128, 128, 128, 0.6));
-    border-right: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.2));
+    border-right: none;
     pointer-events: none; /* 防止行号栏拦截鼠标事件，避免干扰代码区的拖拽选择 */
 }
 
@@ -197,11 +199,42 @@
 .milkdown .editor .code-block-wrapper pre code {
     flex: 1;
     min-width: 0;
-    padding: 1em;
+    padding: 0.5em 1em;
+    padding-right: 1.5em; /* 右侧额外留出空间，避免被滚动条遮挡 */
     background: none;
     font-size: 0.9em;
     line-height: 1.5; /* 与 .line-numbers-gutter 保持一致，避免行号错位 */
     border-radius: 0;
+    overflow: auto; /* code 元素负责滚动 */
+    max-height: var(--code-block-max-height, 500px);
+    scrollbar-width: thin;
+    scrollbar-color: rgba(128, 128, 128, 0.5) transparent;
+}
+
+/* code 元素的滚动条样式 */
+.milkdown .editor .code-block-wrapper pre code::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+}
+
+.milkdown .editor .code-block-wrapper pre code::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.milkdown .editor .code-block-wrapper pre code::-webkit-scrollbar-thumb {
+    background: rgba(128, 128, 128, 0.5);
+    border-radius: 5px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+}
+
+.milkdown .editor .code-block-wrapper pre code::-webkit-scrollbar-thumb:hover {
+    background: rgba(128, 128, 128, 0.7);
+    background-clip: padding-box;
+}
+
+.milkdown .editor .code-block-wrapper pre code::-webkit-scrollbar-corner {
+    background: transparent;
 }
 
 /* ─── Prism 语法高亮 Token 颜色 ─── */
@@ -599,7 +632,7 @@
     padding: 1em 0.75em;
     min-width: 2.5em;
     background: var(--vscode-textCodeBlock-background, rgba(128, 128, 128, 0.1));
-    border-right: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.2));
+    border-right: none;
     color: var(--vscode-editorLineNumber-foreground, rgba(128, 128, 128, 0.6));
     font-family: var(--vscode-editor-font-family, monospace);
     font-size: 14px;

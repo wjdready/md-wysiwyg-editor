@@ -104,7 +104,7 @@ function createLangPicker(
     const triggerBtn = document.createElement("button");
     triggerBtn.className = "lang-picker-btn";
     triggerBtn.tabIndex = -1;
-    triggerBtn.innerHTML = `<span class="lang-picker-label">${getLangLabel(currentLang)}</span>${IconChevronDown}`;
+    triggerBtn.innerHTML = `<span class="lang-picker-label">${getLangLabel(currentLang)}</span>`;
 
     const dropdown = document.createElement("div");
     dropdown.className = "lang-picker-dropdown";
@@ -492,9 +492,10 @@ export function createCodeBlockView(
 
         const onMove = (ev: MouseEvent) => {
             const newH = Math.max(80, startH + ev.clientY - startY);
-            // 同步更新两个元素，确保切换模式时高度保持一致
+            // 同步更新所有相关元素，确保切换模式时高度保持一致
             pre.style.maxHeight = `${newH}px`;
             pre.style.height = `${newH}px`;
+            codeEl.style.maxHeight = `${newH}px`;
             mermaidPreview.style.maxHeight = `${newH}px`;
             mermaidPreview.style.height = `${newH}px`;
         };
