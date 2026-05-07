@@ -274,6 +274,7 @@ export function createCodeBlockView(
     contentDOM: HTMLElement;
     update: (n: PMNode) => boolean;
     ignoreMutation: (m: ViewMutationRecord) => boolean;
+    stopEvent: (event: Event) => boolean;
     destroy: () => void;
 } {
     const _id = Math.random().toString(36).slice(2, 6);
@@ -532,6 +533,26 @@ export function createCodeBlockView(
             sel?.addRange(range);
         }
     });
+
+    // 在 wrapper 上拦截 Tab 键（捕获阶段，在 ProseMirror 之前）
+    wrapper.addEventListener("keydown", (e) => {
+        if (e.key === "Tab" && e.target === codeEl) {
+            e.preventDefault();
+            e.stopPropagation();
+            // 插入 4 个空格
+            const sel = window.getSelection();
+            if (sel && sel.rangeCount > 0) {
+                const range = sel.getRangeAt(0);
+                range.deleteContents();
+                const textNode = document.createTextNode("    ");
+                range.insertNode(textNode);
+                range.setStartAfter(textNode);
+                range.setEndAfter(textNode);
+                sel.removeAllRanges();
+                sel.addRange(range);
+            }
+        }
+    }, true); // 捕获阶段
 
     // 移除旧的滚动同步代码，因为现在不需要了
     // codeEl 和 lineGutter 都不再独立滚动，它们跟随 pre 的滚动
@@ -1214,6 +1235,14 @@ export function createCodeBlockView(
                 !codeEl.contains(mutation.target as Node) &&
                 mutation.target !== codeEl
             );
+        },
+
+        stopEvent(event: Event): boolean {
+            // Tab 键由代码块自己处理，不传递给 ProseMirror
+            if (event instanceof KeyboardEvent && event.key === "Tab") {
+                return true;
+            }
+            return false;
         },
 
         destroy(): void {

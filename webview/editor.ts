@@ -184,6 +184,30 @@ const formatKeymapPlugin = $prose((ctx) =>
     }),
 );
 
+// 代码块 Tab 键处理：插入 4 个空格
+const codeBlockTabPlugin = $prose((ctx) => {
+    const schema = ctx.get(schemaCtx);
+    return keymap({
+        "Tab": (state, dispatch) => {
+            const { selection } = state;
+            const { $from } = selection;
+
+            // 检查是否在代码块内
+            for (let d = $from.depth; d >= 0; d--) {
+                if ($from.node(d).type === schema.nodes.code_block) {
+                    if (dispatch) {
+                        // 插入 4 个空格
+                        const tr = state.tr.insertText("    ");
+                        dispatch(tr);
+                    }
+                    return true;
+                }
+            }
+            return false;
+        },
+    });
+});
+
 // 选区变更回调（由 index.ts 注入，用于驱动浮动工具栏）
 let _onSelectionChange: ((view: EditorView) => void) | null = null;
 
@@ -1229,6 +1253,7 @@ export async function createEditor(
         .use(mathBlockKeymapPlugin)
         .use(selectionPlugin)
         .use(formatKeymapPlugin)
+        .use(codeBlockTabPlugin)
         .use(cellClickFixPlugin)
         .use(listSpreadNormalizePlugin)
         .use(ensureTrailingParagraphPlugin)

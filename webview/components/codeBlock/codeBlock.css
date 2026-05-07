@@ -179,9 +179,11 @@
     grid-template-rows: 1fr;
     margin: 0;
     padding: 0;
-    background: var(
-        --vscode-textCodeBlock-background,
-        rgba(128, 128, 128, 0.1)
+    /* 使用 color-mix 让 VSCode 主题色更透明（30% 主题色 + 70% 透明） */
+    background: color-mix(
+        in srgb,
+        var(--vscode-textCodeBlock-background, rgba(128, 128, 128, 0.1)) 70%,
+        transparent
     );
     border-radius: 6px;
     overflow: auto; /* pre 负责滚动，滚动条横跨整个代码块 */
@@ -736,7 +738,11 @@
 }
 
 .code-lightbox-textarea::selection {
-    background: var(--vscode-editor-selectionBackground, rgba(38, 79, 120, 0.7));
+    background: color-mix(
+        in srgb,
+        var(--vscode-editor-selectionBackground, rgba(38, 79, 120, 0.7)) 50%,
+        transparent
+    );
     -webkit-text-fill-color: transparent;
 }
 
